@@ -1,0 +1,131 @@
+---
+title: "Weightlifting Prediction Algorithm Development"
+author: "Steve Rust"
+date: "September 22, 2015"
+output: html_document
+---
+
+```{r, echo=FALSE, message=FALSE}
+library(caret)
+setwd("C:/Users/Steve/Documents/My Folders/Coursera/Data Science/Practical Machine Learning/CP")
+```
+
+#Introduction
+
+This report documents the development and application of an algorithm to predict whether or not a dumbbell exercise is being performed properly and, if not, what type of mistake is being made.  The training and test data employed were downloaded from the following web locations on September 21, 2015.
+
+Training (https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) & Test (https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv).
+
+The collection of the data is documented by Velloso et. al. [1]. Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).  The training data contains a variable (classe) noting the type of curl being performed during data collection.  Predictor data comprises 52 measurements taken from four Razor inertial measurment units mounted on the arm, belt, dumbell, and forearm.
+
+This report docuemnts the training of a prediction algorithm for the fashion in which the curl is beign performed (the classe variable) and the application of the prediction algorithm to 20 test cases.  
+
+#Data Preparation
+
+The training dataset was read into a data frame (train) and only the "classe" variable and 52 variables to be used as predictors were kept.  A second dataframe (train.metadata) was created to contain the other six variables.  Analogous dataframes (test, test.metadata) were created for the test dataset.
+
+```{r}
+
+train <- subset(read.csv("pml-training.csv"), select = c(classe,
+    total_accel_arm, accel_arm_x, accel_arm_y, accel_arm_z, gyros_arm_x,
+    gyros_arm_y, gyros_arm_z, magnet_arm_x, magnet_arm_y, magnet_arm_z,
+    pitch_arm, roll_arm, yaw_arm, total_accel_belt, accel_belt_x,
+    accel_belt_y, accel_belt_z, gyros_belt_x, gyros_belt_y, gyros_belt_z,
+    magnet_belt_x, magnet_belt_y, magnet_belt_z, pitch_belt, roll_belt,
+    yaw_belt, total_accel_dumbbell, accel_dumbbell_x, accel_dumbbell_y, accel_dumbbell_z,
+    gyros_dumbbell_x, gyros_dumbbell_y, gyros_dumbbell_z, magnet_dumbbell_x, magnet_dumbbell_y,
+    magnet_dumbbell_z, pitch_dumbbell, roll_dumbbell, yaw_dumbbell, total_accel_forearm,
+    accel_forearm_x, accel_forearm_y, accel_forearm_z, gyros_forearm_x, gyros_forearm_y,
+    gyros_forearm_z, magnet_forearm_x, magnet_forearm_y, magnet_forearm_z, pitch_forearm,
+    roll_forearm, yaw_forearm))
+
+train.metadata <- subset(read.csv("pml-training.csv"),
+    select = c(user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, 
+               new_window, num_window))
+
+test <- subset(read.csv("pml-testing.csv"), select = c(
+    total_accel_arm, accel_arm_x, accel_arm_y, accel_arm_z, gyros_arm_x,
+    gyros_arm_y, gyros_arm_z, magnet_arm_x, magnet_arm_y, magnet_arm_z,
+    pitch_arm, roll_arm, yaw_arm, total_accel_belt, accel_belt_x,
+    accel_belt_y, accel_belt_z, gyros_belt_x, gyros_belt_y, gyros_belt_z,
+    magnet_belt_x, magnet_belt_y, magnet_belt_z, pitch_belt, roll_belt,
+    yaw_belt, total_accel_dumbbell, accel_dumbbell_x, accel_dumbbell_y, accel_dumbbell_z,
+    gyros_dumbbell_x, gyros_dumbbell_y, gyros_dumbbell_z, magnet_dumbbell_x, magnet_dumbbell_y,
+    magnet_dumbbell_z, pitch_dumbbell, roll_dumbbell, yaw_dumbbell, total_accel_forearm,
+    accel_forearm_x, accel_forearm_y, accel_forearm_z, gyros_forearm_x, gyros_forearm_y,
+    gyros_forearm_z, magnet_forearm_x, magnet_forearm_y, magnet_forearm_z, pitch_forearm,
+    roll_forearm, yaw_forearm))
+
+test.metadata <- subset(read.csv("pml-testing.csv"),
+    select = c(user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, 
+               new_window, num_window))
+```
+
+#Algorithm Development
+
+The training data was pre-processed using principal component analysis and varing the number of principal components (PCs) kept from 1 to 52.  A separate quadratic discriminant analysis (QDA) classifier was trained for each number of PCs and the accuracy of each classifier was estimated using 2 repetitions of 10-fold cross-validation.  Cross-validation accuracy is plotted vs. the number of PCs employed in the plot below.  
+
+```{r, cache=TRUE, message=FALSE}
+cv.accuracy <- vector(length=52) 
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 2)
+for (i in 1:52) {
+    PreProcAlg <- preProcess(train[,-1], method="pca", pcaComp=i)
+    train.PCs <- predict(PreProcAlg, train[,-1])
+    fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 2)
+    trained.model <- train(train$classe ~ ., method="qda", trControl = fitControl, 
+                           data=train.PCs)
+    cv.accuracy[i] <- mean(trained.model$resample$Accuracy)
+}
+x <- c(1:52)
+plot(x=x, y=cv.accuracy, xlab="# of Principal Components", ylab="Cross-Validation Accuracy",
+     main="Cross-Validation Accuracy vs. # of Principal Components")
+```
+
+The plot of cross-validation accuracy (cv.accuracy) versus number of PCs indicates that the QDA classifier does not become over-trained even when all 52 PCs are employed.  Therefore, a final QDA algorithm was trained using all 52 PCs.  A confusion matrix and training summary are presented below for the final QDA algorithm (final.trained.model). 
+
+```{r, cached=TRUE, message=FALSE}
+PreProcAlg <- preProcess(train[,-1], method="pca", pcaComp=52)
+train.PCs <- predict(PreProcAlg, train[,-1])
+final.trained.model <- train(train$classe ~ ., method="qda", data=train.PCs)
+
+train.preds <- predict(final.trained.model)
+confusionMatrix(train.preds, train$classe)
+```
+
+The final QDA classifier has 90% accuracy for the training data set.
+
+#Expected Out-of-Sample Performence
+
+The QDA classifier algorithm is expected to be 90% accurate for new data based on the 90% cross-validation accuracy for 52 PCs, assuming that the new dumbbell exercises are conducted in the same manner as the exersises that produced the training data.
+
+#Predictions for Test Cases
+
+The trained model was applied to the test dataframe to produce a factor vector (test.preds) containing the predictions for the 20 test cases.
+
+```{r}
+test.PCs <- predict(PreProcAlg,  test)
+test.preds <- predict(trained.model, newdata=test.PCs)
+```
+
+The predictions are A A B A A E D B A A B C B A E E A B B B.  For each test case, a file containing a prediction (a single letter) was created.
+
+```{r}
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+pml_write_files(test.preds)
+```
+
+The test case prediction files were submitted for automated grading.  Prediction accuracy for the test cases was 95% (19 out of 20 correct).  All predictions but the first are correct.
+
+#Conclusion
+
+It is possible to detect when common exercise mistakes are being made based on data produced by stretegically mounted intertial measurement devices. 
+
+#Reference
+
+[1]  Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013. 
